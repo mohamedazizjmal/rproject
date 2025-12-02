@@ -8,6 +8,7 @@ date: "2025-11-28"
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "C:/Users/azizj/Desktop/finalrproject/ncfile")
 ```
 
 ```{r}
@@ -307,4 +308,396 @@ plot_europe_monthly <- function(result, index) {
 europe_plots <- map2(all_results, seq_along(all_results), plot_europe_monthly)
 europe_plots
 ```
+```{r}
+# Function to plot individual month
+plot_monthly_map <- function(result, index) {
+  precip_raster <- result$raster
+  month_name <- result$stats$month_name
+  
+  # Convert to data frame for ggplot
+  precip_df <- as.data.frame(precip_raster, xy = TRUE)
+  colnames(precip_df) <- c("lon", "lat", "precipitation")
+  
+  ggplot(precip_df, aes(x = lon, y = lat, fill = precipitation)) +
+    geom_tile() +
+    borders("world", colour = "black", fill = NA, size = 0.2) +
+    scale_fill_viridis_c(option = "plasma", 
+                         name = "Precipitation (mm)",
+                         limits = c(0, max(summary_df$max_precip))) +
+    coord_quickmap() +
+    labs(title = paste("Precipitation -", month_name),
+         x = "Longitude", y = "Latitude") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5))
+}
+monthly_plots <- map2(all_results, seq_along(all_results), plot_monthly_map)
+
+# Display first few plots
+print(monthly_plots[[1]])
+print(monthly_plots[[2]])
+print(monthly_plots[[3]])
+print(monthly_plots[[4]])
+print(monthly_plots[[5]])
+print(monthly_plots[[6]])
+print(monthly_plots[[7]])
+print(monthly_plots[[8]])
+print(monthly_plots[[9]])
+print(monthly_plots[[10]])
+print(monthly_plots[[11]])
+print(monthly_plots[[12]])
+```
+## Annual percipitation
+```{r}
+# Extract all rasters
+all_rasters <- purrr::map(all_results, "raster")
+
+# Create annual mean (if all rasters have same extent)
+if (length(all_rasters) > 0) {
+  annual_mean <- mean(stack(all_rasters), na.rm = TRUE)
+  
+  # Plot annual mean
+  annual_df <- as.data.frame(annual_mean, xy = TRUE)
+  colnames(annual_df) <- c("lon", "lat", "precipitation")
+  
+  ggplot(annual_df, aes(x = lon, y = lat, fill = precipitation)) +
+    geom_tile() +
+    borders("world", colour = "black", fill = NA) +
+    scale_fill_viridis_c(option = "plasma", name = "Annual Mean\nPrecipitation (mm)") +
+    coord_quickmap() +
+    labs(title = "Annual Mean Precipitation - 2022",
+         x = "Longitude", y = "Latitude") +
+    theme_minimal()
+}
+```
+```{r}
+# 9. Regional analysis example (Europe)
+# Europe bounding box
+europe_bbox <- extent(-10, 40, 35, 70)
+
+# Create monthly plots for Europe
+plot_europe_monthly <- function(result, index) {
+  precip_raster <- result$raster
+  month_name <- result$stats$month_name
+  
+  precip_europe <- crop(precip_raster, europe_bbox)
+  precip_df <- as.data.frame(precip_europe, xy = TRUE)
+  colnames(precip_df) <- c("lon", "lat", "precipitation")
+  
+  ggplot(precip_df, aes(x = lon, y = lat, fill = precipitation)) +
+    geom_tile() +
+    borders("world", colour = "black", fill = NA, size = 0.2) +
+    scale_fill_viridis_c(option = "turbo", name = "Precipitation (mm)") +
+    coord_quickmap(xlim = c(-10, 40), ylim = c(35, 70)) +
+    labs(title = paste("Europe mean Precipitation -", month_name),
+         x = "Longitude", y = "Latitude") +
+    theme_minimal()
+}
+
+# Create European maps
+europe_plots <- map2(all_results, seq_along(all_results), plot_europe_monthly)
+europe_plots
+```
+```{r}
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+```
+```{r}
+ africa_sf <- rnaturalearth::ne_countries(continent = 'africa', returnclass = "sf")
+world_sf <- rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+
+# Define Africa bounding box 
+africa_bbox <- raster::extent(-25, 60, -40, 40)
+
+# function for Africa maps
+create_africa_map_improved <- function(result) {
+  precip_raster <- result$raster
+  month_name <- result$stats$month_name
+  
+  # Crop to Africa region 
+  precip_africa <- raster::crop(precip_raster, africa_bbox)
+  precip_africa <- raster::mask(precip_africa, as(africa_sf, "Spatial"))
+  
+  # Convert to data frame
+  precip_df <- as.data.frame(precip_africa, xy = TRUE)
+  colnames(precip_df) <- c("lon", "lat", "precipitation")
+  precip_df <- precip_df[!is.na(precip_df$precipitation), ]
+  
+  # Create the plot
+  ggplot() +
+    # Precipitation data
+    geom_tile(data = precip_df, aes(x = lon, y = lat, fill = precipitation)) +
+    # Africa boundaries
+    geom_sf(data = africa_sf, fill = NA, color = "black", size = 0.3) +
+    # World context
+    geom_sf(data = world_sf, fill = NA, color = "gray50", size = 0.1) +
+    # Color scale
+    scale_fill_viridis_c(
+      option = "turbo", 
+      name = "Precipitation\n(mm)",
+      limits = c(0, max(summary_df$max_precip, na.rm = TRUE)),
+      na.value = NA
+    ) +
+    # Proper coordinate system and limits
+    coord_sf(
+      xlim = c(-25, 60), 
+      ylim = c(-40, 40),
+      expand = FALSE,
+      crs = st_crs(4326)
+    ) +
+    labs(
+      title = paste("Africa Precipitation -", month_name),
+      subtitle = "Monthly precipitation distribution",
+      x = "Longitude", 
+      y = "Latitude"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+      plot.subtitle = element_text(hjust = 0.5, size = 10),
+      panel.background = element_rect(fill = "lightblue", colour = NA),
+      panel.grid = element_line(color = "gray80", size = 0.2)
+    )
+}
+
+# Create improved Africa maps for first 3 months
+africa_improved_plots <- purrr::map(all_results[1:3], create_africa_map_improved)
+
+# Display improved plots
+africa_improved_plots[[1]]
+africa_improved_plots[[2]]
+africa_improved_plots[[3]]
+
+```
+```{r}
+calculate_monthly_total <- function(result, month_num) {
+  cat("Processing month", month_num, "\n")
+  
+  # Your raster contains daily mean precipitation (mm/day)
+  daily_mean_raster <- result$raster
+  
+  # Get number of days in the specific month
+  year <- 2022
+  days_in_month <- lubridate::days_in_month(as.Date(paste0(year, "-", 
+                                                          sprintf("%02d", month_num), "-01")))
+  
+  # Calculate monthly total: daily mean × number of days
+  monthly_total_raster <- daily_mean_raster * days_in_month
+  
+  # Set proper name
+  names(monthly_total_raster) <- paste0("Month_", month_num, "_Total")
+  
+  return(list(
+    raster = monthly_total_raster,
+    daily_mean = daily_mean_raster,
+    days_in_month = days_in_month,
+    month_num = month_num,
+    month_name = month.name[month_num]
+  ))
+}
+
+# Calculate monthly totals for all months
+monthly_totals_list <- purrr::map2(all_results, summary_df$month, calculate_monthly_total)
+
+# Extract the total rasters
+monthly_total_rasters <- purrr::map(monthly_totals_list, "raster")
+
+# Create a summary data frame of monthly totals
+monthly_total_stats <- purrr::map_dfr(monthly_totals_list, function(x) {
+  values <- raster::values(x$raster)
+  values <- values[!is.na(values)]
+  
+  data.frame(
+    month = x$month_num,
+    month_name = x$month_name,
+    days_in_month = x$days_in_month,
+    monthly_total_mean = mean(values, na.rm = TRUE),
+    monthly_total_median = median(values, na.rm = TRUE),
+    monthly_total_max = max(values, na.rm = TRUE),
+    monthly_total_min = min(values, na.rm = TRUE),
+    monthly_total_sd = sd(values, na.rm = TRUE)
+  )
+})
+
+cat("\n=== MONTHLY PRECIPITATION TOTALS ===\n")
+print(monthly_total_stats)
+```
+
+## 16. Visualize Monthly Precipitation Totals
+
+```{r visualize-monthly-totals}
+# 1. Bar plot of monthly totals
+ggplot(monthly_total_stats, aes(x = factor(month, labels = month.abb), 
+                                y = monthly_total_mean)) +
+  geom_bar(stat = "identity", fill = "darkgreen", alpha = 0.7) +
+  geom_text(aes(label = round(monthly_total_mean, 1)), 
+            vjust = -0.5, size = 3) +
+  labs(title = "Monthly Precipitation Totals - 2022",
+       subtitle = "Total precipitation per month (mm)",
+       x = "Month", y = "Total Precipitation (mm)") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# 2. Compare daily mean vs monthly total for a specific location
+# Let's take a point (e.g., London: 0° lon, 51° lat)
+london_point <- data.frame(lon = 0, lat = 51)
+
+extract_precipitation_series <- function(month_totals, point) {
+  purrr::map_dfr(month_totals, function(x) {
+    daily_mean <- raster::extract(x$daily_mean, point)
+    monthly_total <- raster::extract(x$raster, point)
+    
+    data.frame(
+      month = x$month_num,
+      month_name = x$month_name,
+      daily_mean_mm = daily_mean,
+      monthly_total_mm = monthly_total
+    )
+  })
+}
+
+london_precip <- extract_precipitation_series(monthly_totals_list, london_point)
+
+ggplot(london_precip, aes(x = factor(month, labels = month.abb))) +
+  geom_bar(aes(y = monthly_total_mm, fill = "Monthly Total"), 
+           stat = "identity", alpha = 0.7) +
+  geom_point(aes(y = daily_mean_mm * 30, color = "Daily Mean × 30"), 
+             size = 3) +
+  scale_fill_manual(values = c("Monthly Total" = "steelblue")) +
+  scale_color_manual(values = c("Daily Mean × 30" = "red")) +
+  labs(title = "London Precipitation - 2022",
+       subtitle = "Monthly totals vs scaled daily means",
+       x = "Month", y = "Precipitation (mm)",
+       fill = "", color = "") +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+
+
+
+
+## 17. Spatial Maps of Monthly Totals
+
+```{r spatial-monthly-totals}
+# Function to plot monthly total maps
+plot_monthly_total_map <- function(month_total) {
+  precip_df <- as.data.frame(month_total$raster, xy = TRUE)
+  colnames(precip_df) <- c("lon", "lat", "precipitation")
+  precip_df <- precip_df[!is.na(precip_df$precipitation), ]
+  
+  ggplot() +
+    geom_tile(data = precip_df, aes(x = lon, y = lat, fill = precipitation)) +
+    borders("world", colour = "black", fill = NA, size = 0.2) +
+    scale_fill_viridis_c(
+      option = "turbo", 
+      name = "Monthly\nTotal (mm)",
+      limits = c(0, max(monthly_total_stats$monthly_total_max, na.rm = TRUE))
+    ) +
+    coord_quickmap() +
+    labs(
+      title = paste("Monthly Precipitation Total -", month_total$month_name),
+      subtitle = paste("Total:", round(mean(precip_df$precipitation, na.rm = TRUE), 1), "mm"),
+      x = "Longitude", 
+      y = "Latitude"
+    ) +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+}
+
+# Plot first 3 months' totals
+monthly_total_maps <- purrr::map(monthly_totals_list[1:7], plot_monthly_total_map)
+monthly_total_maps[[1]]
+monthly_total_maps[[2]]
+monthly_total_maps[[3]]
+monthly_total_maps[[4]]
+monthly_total_maps[[5]]
+monthly_total_maps[[6]]
+monthly_total_maps[[7]]
+```
+## Annual Precipitation Total
+```{r}
+# Calculate annual total by summing monthly totals
+if (length(monthly_total_rasters) == 12) {
+  annual_total_raster <- sum(raster::stack(monthly_total_rasters), na.rm = TRUE)
+  
+  # Plot annual total
+  annual_total_df <- as.data.frame(annual_total_raster, xy = TRUE)
+  colnames(annual_total_df) <- c("lon", "lat", "annual_precipitation")
+  
+  ggplot(annual_total_df, aes(x = lon, y = lat, fill = annual_precipitation)) +
+    geom_tile() +
+    borders("world", colour = "black", fill = NA, size = 0.2) +
+    scale_fill_viridis_c(
+      option = "plasma", 
+      name = "Annual\nTotal (mm)",
+      limits = c(0, max(annual_total_df$annual_precipitation, na.rm = TRUE))
+    ) +
+    coord_quickmap() +
+    labs(
+      title = "Annual Precipitation Total - 2022",
+      subtitle = "Sum of monthly precipitation totals",
+      x = "Longitude", 
+      y = "Latitude"
+    ) +
+    theme_minimal()
+  
+  # Calculate global annual statistics
+  annual_values <- annual_total_df$annual_precipitation
+  annual_values <- annual_values[!is.na(annual_values)]
+  
+  cat("\n=== ANNUAL PRECIPITATION TOTAL ===\n")
+  cat(sprintf("Global mean annual precipitation: %.1f mm\n", mean(annual_values)))
+  cat(sprintf("Global median annual precipitation: %.1f mm\n", median(annual_values)))
+  cat(sprintf("Global max annual precipitation: %.1f mm\n", max(annual_values)))
+  cat(sprintf("Global min annual precipitation: %.1f mm\n", min(annual_values)))
+  
+  # Compare with global average (~1000 mm/year)
+  global_climatology <- 1000
+  diff_percent <- (mean(annual_values) - global_climatology) / global_climatology * 100
+  cat(sprintf("Difference from global climatology (1000 mm): %.1f%%\n", diff_percent))
+}
+```
+```{r}
+# Analyze monthly totals for specific regions
+analyze_region_totals <- function(region_name, bbox) {
+  region_totals <- purrr::map_dfr(monthly_totals_list, function(month_data) {
+    region_raster <- raster::crop(month_data$raster, bbox)
+    region_raster <- raster::mask(region_raster, as(africa_sf, "Spatial"))
+    
+    values <- raster::values(region_raster)
+    values <- values[!is.na(values)]
+    
+    data.frame(
+      month = month_data$month_num,
+      month_name = month_data$month_name,
+      region = region_name,
+      mean_total = mean(values, na.rm = TRUE),
+      median_total = median(values, na.rm = TRUE)
+    )
+  })
+  
+  return(region_totals)
+}
+
+# Example: Compare different regions
+regions <- list(
+  "Tropics" = raster::extent(-180, 180, -23.5, 23.5),
+  "Northern Hemisphere" = raster::extent(-180, 180, 23.5, 90),
+  "Southern Hemisphere" = raster::extent(-180, 180, -90, -23.5)
+)
+
+region_analyses <- purrr::map2_df(names(regions), regions, analyze_region_totals)
+
+# Plot regional comparisons
+ggplot(region_analyses, aes(x = factor(month, labels = month.abb), 
+                            y = mean_total, fill = region)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Monthly Precipitation Totals by Region - 2022",
+       x = "Month", y = "Mean Monthly Total (mm)",
+       fill = "Region") +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
 
