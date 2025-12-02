@@ -1,0 +1,310 @@
+---
+title: "ncproject"
+output:
+  html_document: default
+  pdf_document: default
+date: "2025-11-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ncdf4)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(raster)
+```
+```{r}
+nc_file <- nc_open("C:\\Users\\azizj\\Desktop\\finalrproject\\ncfile\\PREmm20220101000000120IMPGS01GL.nc")
+var_names <- names(nc_file$var)
+print("Available variables:")
+print(var_names)
+lon <- ncvar_get(nc_file, "lon_bnds")
+lat <- ncvar_get(nc_file, "lat_bnds")
+time <- ncvar_get(nc_file, "time_bnds")
+precipitation <- ncvar_get(nc_file, "precipitation")
+num_obs_fraction <- ncvar_get(nc_file, "num_obs_fraction")
+num_obs_rate <- ncvar_get(nc_file, "num_obs_rate")
+num_days <- ncvar_get(nc_file, "num_days")
+quality_flag <- ncvar_get(nc_file, "quality_flag")
+```
+```{r}
+precip_raster <- raster(t(precipitation), 
+                        xmn = min(lon), xmx = max(lon),
+                        ymn = min(lat), ymx = max(lat))
+precip_raster
+# Plot precipitation map
+plot(precip_raster, main = "Monthly Precipitation (mm)",
+     xlab = "Longitude", ylab = "Latitude")
+maps::map('world', add = TRUE, col = "gray50")
+```
+```{r}
+# Prepare data for ggplot
+precip_df <- as.data.frame(precip_raster, xy = TRUE)
+colnames(precip_df) <- c("lon", "lat", "precipitation")
+
+ggplot(precip_df, aes(x = lon, y = lat, fill = precipitation)) + geom_tile() +
+  borders("world", colour = "black", fill = NA) +
+  scale_fill_viridis_c(option = "plasma", name = "Precipitation (mm)") +
+  coord_quickmap() +
+  labs(title = "Global Precipitation - January 2022",
+       subtitle = "Monthly mean of daily accumulated precipitation",
+       x = "Longitude", y = "Latitude") +
+  theme_minimal()
+```
+```{r}
+# Histogram of precipitation values
+precip_vector <- as.vector(precipitation)
+precip_vector <- precip_vector[!is.na(precip_vector)]
+
+hist(precip_vector, breaks = 50, col = "lightblue",
+     main = "Distribution of Precipitation Values",
+     xlab = "Precipitation (mm)", ylab = "Frequency")
+```
+```{r}
+europe_bbox <- extent(-10, 40, 35, 70)  # xmin, xmax, ymin, ymax
+precip_europe <- crop(precip_raster, europe_bbox)
+
+plot(precip_europe, main = "Precipitation - Europe")
+maps::map('world', add = TRUE, col = "gray50")
+```
+```{r}
+# Now we are going to do the work for all the months
+```
+```{r}
+library(purrr)
+library(stringr)
+library(lubridate)
+library(reshape2)
+library(maps)
+library(mapdata)
+```
+```{r}
+setwd("C:\\Users\\azizj\\Desktop\\finalrproject\\ncfile")  # Change this to your actual path
+
+# 1. Identify all NetCDF files
+nc_files <- list.files(pattern = "\\.nc$", full.names = TRUE)
+print(basename(nc_files))
+```
+```{r}
+# 2. Function to extract month from filename
+extract_month <- function(filename) {
+  # Assuming filenames contain month information like "202201", "202202", etc.
+  month_str <- str_extract(basename(filename), "2022[0-9]{2}")
+  if (!is.na(month_str)) {
+    return(as.numeric(substr(month_str, 5, 6)))
+  } else {
+    # Alternative: extract from time coverage in file
+    return(NA)
+  }
+}
+extract_month("PREmm20221001000000120IMPGS01GL.nc")
+extract_month("PREmm20220101000000120IMPGS01GL.nc")
+extract_month("PREmm20220601000000120IMPGS01GL.nc")
+```
+```{r}
+# 3. Main function to process a single NetCDF file
+process_nc_file <- function(file_path) {
+  cat("Processing:", basename(file_path), "\n")
+  
+  # Open NetCDF file
+  nc_file <- nc_open(file_path)
+  
+  # Extract basic information
+  tryCatch({
+    # Read dimensions
+    lon <- ncvar_get(nc_file, "lon")
+    lat <- ncvar_get(nc_file, "lat")
+    time_val <- ncvar_get(nc_file, "time")
+    
+    # Read precipitation data
+    precipitation <- ncvar_get(nc_file, "precipitation")
+    
+    # Get time information and convert to date
+    time_units <- ncatt_get(nc_file, "time", "units")$value
+    if (grepl("since 2000", time_units)) {
+      date_actual <- as.POSIXct(time_val, origin = "2000-01-01", tz = "UTC")
+    } else if (grepl("since 1970", time_units)) {
+      date_actual <- as.POSIXct(time_val, origin = "1970-01-01", tz = "UTC")
+    } else {
+      date_actual <- NA
+    }
+    
+    # Extract month from date
+    if (!is.na(date_actual)) {
+      month_num <- as.numeric(format(date_actual, "%m"))
+      month_name <- format(date_actual, "%B %Y")
+    } else {
+      # Try to extract from filename as fallback
+      month_num <- extract_month(file_path)
+      month_name <- ifelse(!is.na(month_num), 
+                           paste(month.name[month_num], "2022"), 
+                           "Unknown Month")
+    }
+    
+    # Calculate statistics
+    precip_vector <- as.vector(precipitation)
+    precip_vector <- precip_vector[!is.na(precip_vector)]
+    
+    stats <- list(
+      file = basename(file_path),
+      month = month_num,
+      month_name = month_name,
+      date = ifelse(!is.na(date_actual), as.character(date_actual[1]), NA),
+      mean_precip = mean(precip_vector, na.rm = TRUE),
+      median_precip = median(precip_vector, na.rm = TRUE),
+      max_precip = max(precip_vector, na.rm = TRUE),
+      min_precip = min(precip_vector, na.rm = TRUE),
+      sd_precip = sd(precip_vector, na.rm = TRUE),
+      total_pixels = length(precip_vector)
+    )
+    
+    # Create raster object for spatial analysis
+    precip_raster <- raster(t(precipitation), 
+                            xmn = min(lon), xmx = max(lon),
+                            ymn = min(lat), ymx = max(lat))
+    
+    # Return results
+    result <- list(
+      stats = stats,
+      raster = precip_raster,
+      matrix = precipitation,
+      lon = lon,
+      lat = lat
+    )
+    
+    return(result)
+    
+  }, error = function(e) {
+    cat("Error processing", basename(file_path), ":", e$message, "\n")
+    return(NULL)
+  }, finally = {
+    nc_close(nc_file)
+  })
+}
+
+# 4. Process all files
+cat("\n=== Processing all files ===\n")
+all_results <- purrr::map(nc_files, process_nc_file)
+
+# Remove any failed processing
+all_results <- compact(all_results)
+
+# 5. Extract statistics and create summary data frame
+stats_list <- purrr::map(all_results, "stats")
+summary_df <- bind_rows(stats_list) %>%
+  arrange(month)
+
+cat("\n=== Summary Statistics ===\n")
+print(summary_df)
+
+```
+```{r}
+## Plot 1: Monthly mean precipitation bar chart
+ggplot(summary_df, aes(x = factor(month), y = mean_precip)) +
+  geom_bar(stat = "identity", fill = "steelblue", alpha = 0.7) +
+  labs(title = "Monthly Mean Precipitation - 2022",
+       x = "Month", y = "Mean Precipitation (mm)") +
+  theme_minimal()
+```
+```{r}
+## Plot 2: Time series of monthly statistics
+summary_df_long <- summary_df %>%
+  dplyr::select(month, mean_precip, median_precip, max_precip) %>%
+  melt(id.vars = "month")
+
+ggplot(summary_df_long, aes(x = month, y = value, color = variable)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(title = "Precipitation Statistics by Month - 2022",
+       x = "Month", y = "Precipitation (mm)",
+       color = "Statistic") +
+  scale_x_continuous(breaks = 1:12, labels = month.abb) +
+  theme_minimal()
+```
+```{r}
+# Function to plot individual month
+plot_monthly_map <- function(result, index) {
+  precip_raster <- result$raster
+  month_name <- result$stats$month_name
+  
+  # Convert to data frame for ggplot
+  precip_df <- as.data.frame(precip_raster, xy = TRUE)
+  colnames(precip_df) <- c("lon", "lat", "precipitation")
+  
+  ggplot(precip_df, aes(x = lon, y = lat, fill = precipitation)) +
+    geom_tile() +
+    borders("world", colour = "black", fill = NA, size = 0.2) +
+    scale_fill_viridis_c(option = "plasma", 
+                         name = "Precipitation (mm)",
+                         limits = c(0, max(summary_df$max_precip))) +
+    coord_quickmap() +
+    labs(title = paste("Precipitation -", month_name),
+         x = "Longitude", y = "Latitude") +
+    theme_minimal() +
+    theme(plot.title = element_text(hjust = 0.5))
+}
+monthly_plots <- map2(all_results, seq_along(all_results), plot_monthly_map)
+
+# Display first few plots
+print(monthly_plots[[1]])
+print(monthly_plots[[2]])
+print(monthly_plots[[3]])
+print(monthly_plots[[4]])
+print(monthly_plots[[5]])
+print(monthly_plots[[6]])
+print(monthly_plots[[7]])
+```
+```{r}
+# Extract all rasters
+all_rasters <- purrr::map(all_results, "raster")
+
+# Create annual mean (if all rasters have same extent)
+if (length(all_rasters) > 0) {
+  annual_mean <- mean(stack(all_rasters), na.rm = TRUE)
+  
+  # Plot annual mean
+  annual_df <- as.data.frame(annual_mean, xy = TRUE)
+  colnames(annual_df) <- c("lon", "lat", "precipitation")
+  
+  ggplot(annual_df, aes(x = lon, y = lat, fill = precipitation)) +
+    geom_tile() +
+    borders("world", colour = "black", fill = NA) +
+    scale_fill_viridis_c(option = "plasma", name = "Annual Mean\nPrecipitation (mm)") +
+    coord_quickmap() +
+    labs(title = "Annual Mean Precipitation - 2022",
+         x = "Longitude", y = "Latitude") +
+    theme_minimal()
+}
+```
+```{r}
+# 9. Regional analysis example (Europe)
+europe_bbox <- extent(-10, 40, 35, 70)  # Europe bounding box
+
+# Create monthly plots for Europe
+plot_europe_monthly <- function(result, index) {
+  precip_raster <- result$raster
+  month_name <- result$stats$month_name
+  
+  precip_europe <- crop(precip_raster, europe_bbox)
+  precip_df <- as.data.frame(precip_europe, xy = TRUE)
+  colnames(precip_df) <- c("lon", "lat", "precipitation")
+  
+  ggplot(precip_df, aes(x = lon, y = lat, fill = precipitation)) +
+    geom_tile() +
+    borders("world", colour = "black", fill = NA, size = 0.2) +
+    scale_fill_viridis_c(option = "turbo", name = "Precipitation (mm)") +
+    coord_quickmap(xlim = c(-10, 40), ylim = c(35, 70)) +
+    labs(title = paste("Europe Precipitation -", month_name),
+         x = "Longitude", y = "Latitude") +
+    theme_minimal()
+}
+
+# Create European maps
+europe_plots <- map2(all_results, seq_along(all_results), plot_europe_monthly)
+europe_plots
+```
+
